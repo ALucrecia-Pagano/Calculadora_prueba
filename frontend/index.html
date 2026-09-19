@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calculadora — Front + API</title>
+  <style>
+    :root {
+      --fondo: #0f172a;
+      --panel: #1e293b;
+      --borde: #334155;
+      --texto: #e2e8f0;
+      --suave: #94a3b8;
+      --acento: #38bdf8;
+      --ok: #4ade80;
+      --error: #f87171;
+
+      /* Paleta categorica para el grafico de operaciones. Son 7 tonos
+         pensados para que se distingan incluso con daltonismo (deuteranopia/
+         protanopia/tritanopia) y para que cada uno tenga suficiente contraste
+         sobre --panel. El orden importa: es lo que separa los tonos mas
+         parecidos entre si todo lo posible. No son colores "lindos" elegidos
+         a ojo, salen de una paleta ya validada. */
+      --serie-suma: #3987e5;
+      --serie-resta: #d95926;
+      --serie-mult: #199e70;
+      --serie-div: #c98500;
+      --serie-pot: #d55181;
+      --serie-raiz: #008300;
+      --serie-porc: #9085e9;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 2rem 1rem;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--fondo);
+      color: var(--texto);
+      display: flex;
+      justify-content: center;
+    }
+
+    .contenedor { width: 100%; max-width: 640px; }
+
+    h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+    .subtitulo { color: var(--suave); margin: 0 0 2rem; font-size: .95rem; }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--borde);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    label {
+      display: block;
+      font-size: .8rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--suave);
+      margin-bottom: .4rem;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      padding: .7rem .9rem;
+      font-size: 1.1rem;
+      background: var(--fondo);
+      color: var(--texto);
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+    }
+
+    input[type="number"]:focus {
+      outline: 2px solid var(--acento);
+      outline-offset: 1px;
+    }
+
+    .fila-operandos {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    /* fieldset + legend es la forma NATIVA de agrupar radios. Sin una sola
+       linea de ARIA, el navegador ya anuncia "Operación, grupo, 1 de 4".
+       Le sacamos los estilos por defecto que son horribles. */
+    fieldset { border: none; padding: 0; margin: 0; }
+
+    legend {
+      padding: 0;
+      font-size: .8rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--suave);
+      margin-bottom: .4rem;
+    }
+
+    /* 4 columnas para 7 operaciones: entran 2 filas parejas (4 + 3), en vez
+       de una sola fila de 7 botones angostos e ilegibles. */
+    .operaciones { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; }
+
+    /* Los radios reales quedan invisibles pero SIGUEN EXISTIENDO y siguen
+       siendo accesibles: se navegan con flechas y los lee un lector de
+       pantalla. Lo que ves y clickeas es el <label> estilado.
+
+       OJO con el como: NO uses display:none ni width:0/height:0. Ambos sacan
+       el elemento del arbol de accesibilidad y ahi si lo rompiste sin darte
+       cuenta, porque visualmente se ve identico. Este patron de 1px + clip-path
+       es el estandar ("visually hidden") justamente porque deja el elemento
+       renderizado para el navegador pero invisible para el ojo. */
+    .operaciones input[type="radio"] {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .operaciones label {
+      margin: 0;
+      text-align: center;
+      padding: .8rem .4rem;
+      background: var(--fondo);
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: .75rem;
+      color: var(--texto);
+      transition: all .15s;
+    }
+
+    .operaciones label .simbolo {
+      display: block;
+      font-size: 1.5rem;
+      line-height: 1;
+      margin-bottom: .3rem;
+    }
+
+    .operaciones label:hover { border-color: var(--acento); }
+
+    .operaciones input:checked + label {
+      background: var(--acento);
+      border-color: var(--acento);
+      color: #0f172a;
+      font-weight: 600;
+    }
+
+    .operaciones input:focus-visible + label {
+      outline: 2px solid var(--acento);
+      outline-offset: 2px;
+    }
+
+    /* Dos columnas asimetricas: la accion principal ocupa el doble que la
+       secundaria. La jerarquia visual tiene que contar cual es cual. */
+    .acciones {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: .75rem;
+      margin-top: 1.5rem;
+    }
+
+    .acciones button {
+      padding: .9rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+
+    /* Accion primaria: llena, con color. */
+    #boton {
+      background: var(--acento);
+      color: #0f172a;
+      border: none;
+    }
+
+    /* Accion secundaria: solo contorno. Compite menos por la atencion. */
+    #boton-limpiar {
+      background: transparent;
+      color: var(--suave);
+      border-color: var(--borde);
+    }
+
+    .acciones button:hover { filter: brightness(1.1); }
+    #boton-limpiar:hover { border-color: var(--acento); color: var(--texto); }
+    .acciones button:disabled { opacity: .5; cursor: wait; filter: none; }
+
+    #resultado { display: none; }
+    #resultado.visible { display: block; }
+
+    /* Invisible para el ojo, presente para el lector de pantalla.
+       Mismo patron que usamos en los radios de operacion, y por la misma
+       razon: display:none o width:0 lo sacarian del arbol de accesibilidad. */
+    .solo-lectores {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .expresion { font-size: 1rem; color: var(--suave); margin: 0 0 .5rem; }
+
+    .valor {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--ok);
+      font-variant-numeric: tabular-nums;
+      word-break: break-all;
+      margin: 0;
+    }
+
+    .valor.error { color: var(--error); font-size: 1.2rem; }
+
+    details { margin-top: 1.25rem; }
+
+    summary {
+      cursor: pointer;
+      color: var(--suave);
+      font-size: .85rem;
+      padding: .5rem 0;
+    }
+
+    pre {
+      background: var(--fondo);
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+      padding: .9rem;
+      overflow-x: auto;
+      font-size: .8rem;
+      color: var(--acento);
+      margin: .5rem 0 0;
+    }
+
+    .etiqueta-http {
+      font-size: .7rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--suave);
+      margin-top: .75rem;
+    }
+
+    /* ----------------------------------------------------------------------
+       Historial
+       ----------------------------------------------------------------------
+       El panel se muestra siempre: a diferencia de la version que dependia
+       de Postgres, leer localStorage es instantaneo (no hay que preguntarle
+       a nadie si "hay base" antes de decidir si se muestra o no). */
+    #panel-historial { display: block; }
+    #panel-historial.visible { display: block; }
+
+    .encabezado-historial {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: .25rem;
+    }
+
+    .encabezado-historial h2 {
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--suave);
+      margin: 0;
+      font-weight: 600;
+    }
+
+    #boton-refrescar {
+      background: transparent;
+      color: var(--suave);
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+      padding: .35rem .7rem;
+      font-size: .75rem;
+      cursor: pointer;
+    }
+
+    #boton-refrescar:hover { border-color: var(--acento); color: var(--texto); }
+    #boton-refrescar:disabled { opacity: .5; cursor: wait; }
+
+    .nota-historial {
+      color: var(--suave);
+      font-size: .85rem;
+      margin: 0 0 .75rem;
+      line-height: 1.5;
+    }
+
+    /* <ol> y no <div>: es una lista ORDENADA de verdad — de la operacion mas
+       reciente a la mas vieja. El orden es informacion, y el elemento tiene
+       que decirlo. Un lector de pantalla anuncia "lista de 5 elementos". */
+    .historial { list-style: none; margin: 0; padding: 0; }
+
+    .historial li {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .6rem 0;
+      border-top: 1px solid var(--borde);
+      font-size: .95rem;
+    }
+
+    .historial li:first-child { border-top: none; }
+
+    .historial .expresion-historial {
+      font-variant-numeric: tabular-nums;
+      word-break: break-all;
+    }
+
+    .historial time {
+      color: var(--suave);
+      font-size: .8rem;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ----------------------------------------------------------------------
+       Grafico de operaciones por tipo
+       ----------------------------------------------------------------------
+       Barras horizontales hechas a mano con divs, sin ninguna libreria de
+       graficos: el resto del proyecto ya tiene esa regla ("no hace falta una
+       sola linea de JavaScript ajeno") y bajar una dependencia externa solo
+       para dibujar 7 rectangulos seria romperla sin necesidad. Ademas, el
+       dia que este proyecto sume Content-Security-Policy (seccion 4.13 del
+       capitulo de despliegue), un <script src> a un CDN es exactamente lo
+       primero que una CSP bien armada bloquea. */
+    #panel-grafico { display: block; }
+    #panel-grafico.visible { display: block; }
+
+    .grafico-barras { display: flex; flex-direction: column; gap: .55rem; }
+
+    .fila-barra {
+      display: grid;
+      /* Etiqueta de ancho fijo, pista flexible, valor de ancho fijo. Con
+         columnas flexibles la pista de cada fila mediria distinto segun el
+         largo del texto vecino, y las barras dejarian de ser comparables
+         entre si a simple vista. */
+      grid-template-columns: 6.5rem 1fr 2.5rem;
+      align-items: center;
+      gap: .6rem;
+    }
+
+    .etiqueta-barra {
+      font-size: .8rem;
+      color: var(--suave);
+      text-align: right;
+    }
+
+    /* La "pista" es el 100% posible; la barra de adentro es la magnitud.
+       Sin la pista de fondo, una barra chica (por ejemplo 1 de 20) se veria
+       igual de "vacia" que ninguna dato: no habria forma de distinguir "poco"
+       de "nada todavia". */
+    .pista-barra {
+      background: var(--fondo);
+      border: 1px solid var(--borde);
+      border-radius: 4px;
+      height: 20px;
+      overflow: hidden;
+    }
+
+    .barra {
+      height: 100%;
+      /* Ancho minimo para que una cuenta de 1 siga siendo visible: una barra
+         de 2px de ancho no se ve, y "se hizo una vez" es un dato tan real
+         como "se hizo cien veces". */
+      min-width: 6px;
+      /* Extremo redondeado del lado del dato (derecha), recto contra el
+         origen (izquierda) -- el mismo lenguaje visual de una barra de carga:
+         el borde recto es "de donde sale", el redondeado es "hasta donde
+         llega". */
+      border-radius: 0 4px 4px 0;
+      transition: width .3s ease;
+    }
+
+    .valor-barra {
+      font-size: .85rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--texto);
+      text-align: right;
+    }
+
+    @media (max-width: 480px) {
+      .fila-operandos { grid-template-columns: 1fr; }
+      .operaciones { grid-template-columns: repeat(3, 1fr); }
+      .fila-barra { grid-template-columns: 5rem 1fr 2rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="contenedor">
+
+    <h1>Calculadora</h1>
+    <p class="subtitulo">
+      Este front no calcula nada. Le manda los datos a una API que corre en
+      <strong>otro servidor, en otro puerto</strong>, y muestra lo que le responde.
+      Hoy esa API está hecha en FastAPI — pero a esta página no le consta.
+    </p>
+
+    <div class="panel">
+      <!-- novalidate NO: dejamos que el navegador valide "required" solo.
+           Menos JavaScript escrito por nosotros = menos bugs nuestros. -->
+      <form id="formulario">
+
+        <div class="fila-operandos">
+          <div>
+            <label for="a">Primer valor</label>
+            <input type="number" id="a" name="a" step="any" required placeholder="0" autofocus>
+          </div>
+          <div>
+            <label for="b">Segundo valor</label>
+            <input type="number" id="b" name="b" step="any" required placeholder="0">
+          </div>
+        </div>
+
+        <!-- Radios y no botones sueltos: la operación es UNA sola entre cuatro
+             opciones mutuamente excluyentes. Ese es exactamente el input que
+             inventaron los radio buttons. Además el navegador garantiza solo
+             que nunca haya dos seleccionadas — no escribís código para eso.
+
+             Todos comparten el mismo name="operacion". ESO es lo que los hace
+             un grupo, no el div que los envuelve. -->
+        <fieldset>
+          <legend>Operación</legend>
+          <div class="operaciones">
+            <input type="radio" id="op-suma" name="operacion" value="suma" checked>
+            <label for="op-suma"><span class="simbolo">+</span>Suma</label>
+
+            <input type="radio" id="op-resta" name="operacion" value="resta">
+            <label for="op-resta"><span class="simbolo">−</span>Resta</label>
+
+            <input type="radio" id="op-mult" name="operacion" value="multiplicacion">
+            <label for="op-mult"><span class="simbolo">×</span>Multiplicación</label>
+
+            <input type="radio" id="op-div" name="operacion" value="division">
+            <label for="op-div"><span class="simbolo">÷</span>División</label>
+
+            <input type="radio" id="op-pot" name="operacion" value="potencia">
+            <label for="op-pot"><span class="simbolo">^</span>Potencia</label>
+
+            <!-- Raiz es UNARIA: la API solo usa "a" e ignora "b" (ver el
+                 comentario de OPERACIONES en main.py). El campo "Segundo
+                 valor" se manda igual porque el contrato lo pide siempre,
+                 pero al usuario no le hace falta explicarle esa interna: la
+                 API simplemente no lo mira. -->
+            <input type="radio" id="op-raiz" name="operacion" value="raiz">
+            <label for="op-raiz"><span class="simbolo">√</span>Raíz</label>
+
+            <input type="radio" id="op-porc" name="operacion" value="porcentaje">
+            <label for="op-porc"><span class="simbolo">%</span>Porcentaje</label>
+          </div>
+        </fieldset>
+
+        <div class="acciones">
+          <button type="submit" id="boton">Enviar a la API</button>
+
+          <!-- ACA ESTA LA TRAMPA: type="button".
+               Un <button> adentro de un <form> es type="submit" POR DEFECTO.
+               Si te olvidas de ponerle type="button", este boton envia el
+               formulario en vez de limpiarlo. Y como ademas limpia los campos,
+               el bug se ve rarisimo: manda el calculo Y borra todo.
+
+               ¿Y por que no type="reset", que existe y es nativo? Porque reset
+               devuelve el form a sus valores INICIALES (vacios), no a cero, y
+               tampoco esconde el panel de resultado. Nosotros queremos otra
+               cosa, asi que lo hacemos a mano. -->
+          <button type="button" id="boton-limpiar">Limpiar</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- REGION DE ANUNCIO para lectores de pantalla.
+         Esta siempre en el DOM y siempre "visible" para la tecnologia
+         asistiva, aunque el ojo no la vea. Cada vez que cambia su texto, el
+         lector de pantalla lo lee en voz alta.
+
+         ¿Por que un elemento aparte en lugar de poner aria-live en el panel
+         de resultado? Porque ese panel se oculta con display:none, y un
+         elemento oculto NO esta en el arbol de accesibilidad: los cambios de
+         texto mientras esta oculto no se anuncian. Una region de anuncio
+         tiene que existir y estar presente desde que carga la pagina.
+
+         aria-live="polite" = "avisá cuando termines lo que estás diciendo",
+         en vez de interrumpir. Correcto para un resultado que el usuario
+         acaba de pedir. -->
+    <p id="anuncio" role="status" aria-live="polite" aria-atomic="true" class="solo-lectores"></p>
+
+    <div class="panel" id="resultado">
+      <p class="expresion" id="expresion"></p>
+      <p class="valor" id="valor"></p>
+
+      <details>
+        <summary>Ver el intercambio HTTP crudo</summary>
+        <p class="etiqueta-http">Lo que salió del navegador (request)</p>
+        <pre id="crudo-envio"></pre>
+        <p class="etiqueta-http">Lo que contestó la API (response)</p>
+        <pre id="crudo-respuesta"></pre>
+      </details>
+    </div>
+
+    <!-- PANEL DE HISTORIAL.
+         Se guarda con localStorage, en este navegador (ver la seccion
+         "HISTORIAL LOCAL" del script, mas abajo, para el por que). Fijate lo
+         que NO cambia respecto al resto del proyecto: ni una linea del
+         formulario, ni del fetch de calcular a la API. Esto vive enteramente
+         del lado del navegador, aparte de la API. -->
+    <section class="panel" id="panel-historial" aria-labelledby="titulo-historial">
+      <div class="encabezado-historial">
+        <h2 id="titulo-historial">Últimas operaciones</h2>
+        <!-- Ya no hace falta un boton de "Actualizar": al ser localStorage,
+             la lista se repinta sola apenas se guarda una cuenta nueva, sin
+             pedirle nada a nadie. Lo que si tiene sentido es poder VACIAR el
+             historial, para volver a empezar de cero (por ejemplo, antes de
+             una demo). -->
+        <button type="button" id="boton-refrescar">Vaciar historial</button>
+      </div>
+
+      <p class="nota-historial" id="nota-historial"></p>
+
+      <ol class="historial" id="historial"></ol>
+    </section>
+
+    <!-- PANEL DEL GRAFICO.
+         Lee el MISMO historial local que el panel de arriba (no pide nada
+         aparte), solo que en vez de listar las ultimas operaciones, las
+         agrupa TODAS por tipo y dibuja una barra por cada una. -->
+    <section class="panel" id="panel-grafico" aria-labelledby="titulo-grafico">
+      <div class="encabezado-historial">
+        <h2 id="titulo-grafico">Operaciones por tipo</h2>
+      </div>
+
+      <p class="nota-historial" id="nota-grafico"></p>
+
+      <div class="grafico-barras" id="grafico-barras"
+           role="img" aria-label="Cantidad de operaciones guardadas, agrupadas por tipo"></div>
+    </section>
+
+  </div>
+
+<!-- Se carga ANTES del script principal: define window.CONFIG, que la linea
+     de abajo necesita. Si invertis el orden, CONFIG no existe todavia. -->
+<script src="config.js"></script>
+
+<script>
+// ===========================================================================
+// Todo el JavaScript del proyecto. No hace falta una sola libreria.
+// fetch viene en el navegador desde hace anios.
+// ===========================================================================
+
+const formulario  = document.getElementById("formulario");
+const boton       = document.getElementById("boton");
+const botonLimpiar = document.getElementById("boton-limpiar");
+const campoA      = document.getElementById("a");
+const campoB      = document.getElementById("b");
+const panel       = document.getElementById("resultado");
+const expresionEl = document.getElementById("expresion");
+const valorEl     = document.getElementById("valor");
+const crudoEnvio  = document.getElementById("crudo-envio");
+const crudoResp   = document.getElementById("crudo-respuesta");
+const anuncioEl   = document.getElementById("anuncio");
+
+const listaHistorial  = document.getElementById("historial");
+const notaHistorial   = document.getElementById("nota-historial");
+const botonRefrescar  = document.getElementById("boton-refrescar");
+
+const graficoBarras   = document.getElementById("grafico-barras");
+const notaGrafico     = document.getElementById("nota-grafico");
+
+// ===========================================================================
+// CONFIGURACION
+// ===========================================================================
+// La URL de la API sale de config.js, que se carga justo antes que este
+// script. En tu maquina ese archivo apunta a 127.0.0.1:8000; en el servidor
+// lo reescribe el contenedor al arrancar con el dominio real.
+//
+// ¿Por que URL COMPLETA y no "/api/calcular" a secas? Porque el front y la
+// API son dos servidores distintos. Con una URL relativa el navegador
+// buscaria la API en el mismo lugar donde esta la pagina, y se comeria un
+// 404 del servidor de archivos.
+//
+// El ?? de abajo es una red de seguridad: si config.js no cargo (te olvidaste
+// de subirlo, se llamo distinto), en vez de un "CONFIG is not defined" que no
+// explica nada, cae al valor local y el error que ves tiene sentido.
+const BASE_API = window.CONFIG?.API_URL ?? "http://127.0.0.1:8000";
+const URL_API = `${BASE_API}/api/calcular`;
+
+// El historial y el grafico NO le preguntan nada a la API (ver la seccion
+// "HISTORIAL LOCAL" mas abajo): se guardan en el propio navegador con
+// localStorage. Por eso ya no hace falta URL_SALUD ni URL_HISTORIAL —el
+// backend sigue teniendo esos endpoints (para el dia que se conecten a
+// Postgres de verdad), pero este front, por ahora, no los usa.
+
+// Cuantas operaciones LISTAMOS (la lista de "Últimas operaciones"). Mostrar
+// las 100 que como mucho vamos a guardar no lo lee nadie.
+const CUANTAS_PARA_LISTAR = 8;
+
+// Cuantas operaciones GUARDAMOS como maximo en localStorage antes de empezar
+// a descartar las mas viejas. Sin un tope, el historial creceria para
+// siempre y el navegador de alguien que usa esto todos los dias terminaria
+// con miles de filas guardadas para nada: nadie mira mas de un puñado.
+const MAXIMO_GUARDADO = 100;
+
+// Cuanto esperamos antes de darnos por vencidos. Sin esto, si la API queda
+// colgada (viva pero sin contestar nunca), el fetch espera PARA SIEMPRE y el
+// boton se queda en "Calculando..." sin salida posible salvo recargar.
+const TIMEOUT_MS = 10000;
+
+// Bandera propia contra el doble envio.
+//
+// Antes el unico freno era boton.disabled, y eso NO ALCANZA: solo bloquea
+// clicks. Apretar Enter en un campo dispara requestSubmit(), que no mira el
+// estado del boton — dos Enter rapidos mandaban DOS pedidos.
+// Verificado: doble click = 1 pedido, doble Enter = 2 pedidos.
+let enviando = false;
+
+formulario.addEventListener("submit", async (evento) => {
+  // Sin esto el navegador recarga la pagina entera y perdes todo. Es EL
+  // primer error clasico de todo el mundo con formularios y fetch.
+  evento.preventDefault();
+
+  // El guard de verdad. Frena el envio venga de donde venga.
+  if (enviando) return;
+  enviando = true;
+
+  // FormData lee los campos del form por su atributo name. No hace falta ir
+  // input por input con getElementById.
+  const datos = new FormData(formulario);
+
+  // Number() explicito: los <input> siempre entregan STRING, aunque digan
+  // type="number". Si mandamos "2" en vez de 2, Pydantic igual lo acepta,
+  // pero acostumbrate a mandar el tipo correcto desde el origen.
+  const cuerpo = {
+    a: Number(datos.get("a")),
+    b: Number(datos.get("b")),
+    operacion: datos.get("operacion"),
+  };
+
+  boton.disabled = true;
+  boton.textContent = "Calculando...";
+  crudoEnvio.textContent = `POST ${URL_API}\n\n` + JSON.stringify(cuerpo, null, 2);
+
+  try {
+    const respuesta = await fetch(URL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo),
+      // Corta el pedido a los 10 segundos y hace que el fetch rechace con
+      // un error de nombre "TimeoutError", que distinguimos mas abajo.
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    // Leemos el cuerpo como TEXTO primero, y recien despues intentamos
+    // parsearlo. ¿Por que no respuesta.json() directo? Porque si la API
+    // contesta algo que no es JSON (por ejemplo el "Internal Server Error"
+    // en texto plano que devuelve un servidor cuando algo explota feo),
+    // .json() lanza una excepcion, caemos al catch de abajo, y el usuario
+    // lee "no se pudo contactar a la API" — que es MENTIRA: la API contesto.
+    // Leyendo texto primero podemos decir la verdad sobre lo que paso.
+    const textoCrudo = await respuesta.text();
+
+    let json;
+    try {
+      json = JSON.parse(textoCrudo);
+    } catch {
+      crudoResp.textContent = `HTTP ${respuesta.status}\n\n${textoCrudo}`;
+      mostrarError(
+        `La API respondió ${respuesta.status} con algo que no es JSON. Mirá el log del servidor.`
+      );
+      return;
+    }
+
+    crudoResp.textContent = `HTTP ${respuesta.status}\n\n` + JSON.stringify(json, null, 2);
+
+    // OJO ACA: fetch NO lanza excepcion cuando la API responde 400 o 500.
+    // Solo falla si no pudo llegar al servidor. El estado HTTP hay que
+    // mirarlo a mano con respuesta.ok. Este es el segundo error clasico.
+    if (!respuesta.ok) {
+      // 400 -> detail es un string. 422 (validacion de Pydantic) -> detail
+      // es una lista de errores por campo.
+      const mensaje = Array.isArray(json.detail)
+        ? json.detail.map((e) => `${e.loc.at(-1)}: ${e.msg}`).join(" | ")
+        : json.detail || "La API rechazó el pedido.";
+      mostrarError(mensaje);
+      return;
+    }
+
+    // No reconstruimos la expresion "a mano" con json.a/json.simbolo/json.b:
+    // raiz y porcentaje se leen distinto ("√64.0 =", "10.0% de 50.0 =") y la
+    // API ya nos manda el formato correcto en json.expresion. Repetir esa
+    // logica en dos lugares (backend Y frontend) es la receta segura para
+    // que un dia se actualice uno y no el otro.
+    expresionEl.textContent = json.expresion.replace(/=.*$/, "=");
+    valorEl.textContent = json.resultado;
+    valorEl.classList.remove("error");
+
+    // Lo mismo que ve el ojo, dicho en una frase completa para quien escucha.
+    anunciar(`Resultado: ${json.expresion}`);
+
+    // La cuenta que acabamos de hacer se guarda ACA, en localStorage, no en
+    // el servidor (ver la seccion "HISTORIAL LOCAL" mas abajo para el por
+    // que). A diferencia de la version anterior —que le preguntaba a la
+    // API "¿qué guardaste?"— esto no necesita ningun viaje de red extra:
+    // ya sabemos exactamente que se guardo, porque lo guardamos nosotros.
+    guardarEnHistorialLocal({
+      a: json.a,
+      b: json.b,
+      operacion: json.operacion,
+      simbolo: json.simbolo,
+      resultado: json.resultado,
+      expresion: json.expresion,
+      creado_en: new Date().toISOString(),
+    });
+    pintarHistorialYGrafico();
+
+  } catch (error) {
+    // Aca caemos cuando el pedido NI SIQUIERA LLEGO a completarse.
+    // Separamos las causas en vez de echarle la culpa siempre a lo mismo:
+    // un mensaje que miente manda a quien debuggea a buscar donde no es.
+    if (error.name === "TimeoutError") {
+      crudoResp.textContent =
+        `La API no contestó en ${TIMEOUT_MS / 1000} segundos y cortamos el pedido.\n` +
+        `Está viva pero tarda demasiado, o se quedó colgada procesando.`;
+      mostrarError(`La API no respondió en ${TIMEOUT_MS / 1000} segundos.`);
+    } else {
+      // Dos causas tipicas, dificiles de distinguir desde el navegador a
+      // proposito (el navegador oculta el detalle por seguridad):
+      //   1. La API esta apagada o no hay red.
+      //   2. La API contesto, pero sin los headers de CORS, y el navegador
+      //      tiro la respuesta a la basura antes de dejartela ver.
+      //
+      // En el caso 2 el servidor muestra el POST en su log como si todo
+      // hubiera salido bien. Por eso desespera: el back dice que respondio,
+      // el front dice que fallo, y los dos tienen razon.
+      crudoResp.textContent =
+        String(error) +
+        "\n\nAbrí la consola del navegador (F12) para ver el motivo exacto." +
+        "\nSi dice 'CORS policy', el origen de esta página no está en la" +
+        "\nlista ORIGENES_PERMITIDOS de backend/main.py." +
+        "\nSi no, fijate si el backend está corriendo.";
+      mostrarError(`No se pudo contactar a la API en ${BASE_API}`);
+    }
+  } finally {
+    // finally corre siempre, salga bien o mal. Si dejaras esto solo en el
+    // camino feliz, un error te deja el boton trabado para siempre.
+    enviando = false;
+    boton.disabled = false;
+    boton.textContent = "Enviar a la API";
+    panel.classList.add("visible");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Limpiar
+// ---------------------------------------------------------------------------
+botonLimpiar.addEventListener("click", () => {
+  // Los dos campos a cero. Ojo: el value de un input SIEMPRE es string,
+  // aunque el input sea type="number". Por eso "0" entre comillas.
+  campoA.value = "";
+  campoB.value = "";
+
+  // Escondemos el resultado viejo. Si no lo hicieras, quedaria en pantalla un
+  // numero que ya no corresponde a lo que muestran los campos. El usuario ve
+  // 0 y 0 arriba, y 42 abajo. Eso no es un detalle estetico: es informacion
+  // MENTIROSA en pantalla, y es peor que no mostrar nada.
+  panel.classList.remove("visible");
+
+  // Devolvemos el foco al primer campo para poder seguir escribiendo sin
+  // tener que agarrar el mouse. Detalle chico, se agradece muchisimo.
+  campoA.focus();
+  campoA.select();
+
+  // Quien no ve la pantalla necesita confirmacion de que el boton hizo algo.
+  anunciar("Campos limpiados. Los dos valores quedaron en cero.");
+});
+
+
+function mostrarError(mensaje) {
+  expresionEl.textContent = "";
+  valorEl.textContent = mensaje;
+  valorEl.classList.add("error");
+
+  // Un error tambien hay que anunciarlo. Si solo lo pintamos de rojo, quien
+  // no ve la pantalla se queda esperando un resultado que nunca llega.
+  anunciar(`Error: ${mensaje}`);
+}
+
+
+// ---------------------------------------------------------------------------
+// Anuncio para lectores de pantalla
+// ---------------------------------------------------------------------------
+function anunciar(texto) {
+  // El truco del vaciado previo: si el texto nuevo es IDENTICO al que ya
+  // estaba, muchos lectores de pantalla no lo consideran un cambio y no lo
+  // leen. Apretar Enviar dos veces con los mismos numeros no anunciaria nada.
+  // Vaciar y volver a escribir en el siguiente tick fuerza el anuncio.
+  anuncioEl.textContent = "";
+  setTimeout(() => { anuncioEl.textContent = texto; }, 50);
+}
+
+
+// ===========================================================================
+// HISTORIAL LOCAL — guardado en el navegador, no en el servidor
+// ===========================================================================
+// Esto se guarda con localStorage: vive SOLO en este navegador, en esta
+// computadora. Si abrís la calculadora desde el celular no vas a ver las
+// cuentas que hiciste en la notebook, y si otra persona entra a la misma
+// URL tiene su propio historial vacío, no el tuyo.
+//
+// ¿Por que este cambio, si el backend YA TIENE /api/salud y /api/historial
+// funcionando contra Postgres? Justamente porque, mientras esa base no este
+// conectada de verdad (ni en tu maquina ni en el servidor), esos dos paneles
+// solo sabian decir "no disponible" — y eso, en una demo, se ve como algo
+// roto en vez de una funcionalidad que todavia no se activo. localStorage
+// hace que el historial y el grafico anden HOY, sin depender de nada mas.
+//
+// El dia que se conecte Postgres de verdad, no se pierde este trabajo: la
+// interfaz (la lista, el grafico, los colores, todo pintarHistorial /
+// pintarGrafico de mas abajo) queda igual. Lo unico que cambiaria es DE
+// DONDE se leen los datos — de localStorage a un fetch — no como se muestran.
+
+const CLAVE_LOCALSTORAGE = "calculadora_historial";
+
+/**
+ * Lee el historial guardado. Nunca explota: si localStorage esta
+ * deshabilitado (modo incognito estricto, alguna configuracion del
+ * navegador) o el contenido quedo corrupto por lo que sea, devuelve una
+ * lista vacia en vez de romper el resto de la pagina. Es la misma idea que
+ * db.guardar() en el backend: guardar el historial es una funcionalidad
+ * SECUNDARIA, y una funcionalidad secundaria nunca puede tumbar a la
+ * principal (que la calculadora calcule).
+ */
+function leerHistorialLocal() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_LOCALSTORAGE);
+    if (!crudo) return [];
+    const datos = JSON.parse(crudo);
+    return Array.isArray(datos) ? datos : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Agrega una operacion al historial local (al principio: las mas nuevas
+ * primero) y recorta a MAXIMO_GUARDADO para que no crezca para siempre.
+ *
+ * NUNCA lanza excepcion hacia afuera, por la misma razon que db.guardar():
+ * la llama el manejador del submit DESPUES de que la cuenta ya salio bien y
+ * se pinto en pantalla. Si esto fallara (localStorage lleno o bloqueado por
+ * el navegador), el usuario ya tiene su resultado — no tiene sentido que
+ * ademas se entere de un error de una funcionalidad secundaria.
+ */
+function guardarEnHistorialLocal(operacion) {
+  try {
+    const historial = leerHistorialLocal();
+    historial.unshift(operacion);
+    historial.length = Math.min(historial.length, MAXIMO_GUARDADO);
+    localStorage.setItem(CLAVE_LOCALSTORAGE, JSON.stringify(historial));
+  } catch (error) {
+    console.warn("No se pudo guardar en el historial local:", error);
+  }
+}
+
+/** Vacia el historial local. Lo dispara el boton "Vaciar historial". */
+function vaciarHistorialLocal() {
+  try {
+    localStorage.removeItem(CLAVE_LOCALSTORAGE);
+  } catch (error) {
+    console.warn("No se pudo vaciar el historial local:", error);
+  }
+  pintarHistorialYGrafico();
+}
+
+/**
+ * Vuelve a leer el historial guardado y repinta la lista Y el grafico.
+ *
+ * A diferencia de la version anterior (que le preguntaba a la API por
+ * separado para cada panel, con su propio viaje de red), esto es puramente
+ * local: no hay await, no hay fetch, no hay por que fallar. Se llama una vez
+ * al cargar la pagina, despues de cada cuenta nueva, y al vaciar.
+ */
+function pintarHistorialYGrafico() {
+  const historial = leerHistorialLocal();
+  pintarHistorial(historial.slice(0, CUANTAS_PARA_LISTAR));
+  pintarGrafico(historial);
+}
+
+
+function pintarHistorial(operaciones) {
+  if (operaciones.length === 0) {
+    listaHistorial.replaceChildren();
+    mostrarNota("Todavía no hay operaciones guardadas en este navegador. Hacé una cuenta y va a aparecer acá.");
+    return;
+  }
+
+  mostrarNota(
+    `Las últimas ${operaciones.length} operaciones, guardadas en este navegador ` +
+    `(no se comparten con otras computadoras ni con otras personas).`
+  );
+
+  const filas = operaciones.map((op) => {
+    const item = document.createElement("li");
+
+    // ¿Por que createElement y textContent, y no innerHTML con un template?
+    // Porque textContent escribe TEXTO: si un valor trajera "<script>", se ve
+    // el texto "<script>" en pantalla y no se ejecuta nada. innerHTML lo
+    // interpretaria como HTML.
+    //
+    // Hoy estos datos salen de nuestra propia API y son numeros validados,
+    // asi que "no puede pasar nada". La regla igual vale: la sanitizacion no
+    // se decide por el dato de hoy, se decide por el camino. El dia que la
+    // API sume un campo que el usuario escribe, este codigo ya esta bien.
+    const expresion = document.createElement("span");
+    expresion.className = "expresion-historial";
+    expresion.textContent = op.expresion;
+
+    // <time> con datetime es el elemento correcto para una fecha: el texto es
+    // para el ojo y el atributo para las maquinas.
+    //
+    // Y aca hay un detalle lindo: creado_en viene de Postgres en UTC. El
+    // navegador lo convierte a la zona horaria DEL VISITANTE. El servidor
+    // guarda un instante absoluto, cada cliente lo muestra en su hora local.
+    // Guardar fechas con zona horaria no es un lujo: es lo que hace posible
+    // esto.
+    const cuando = document.createElement("time");
+    cuando.dateTime = op.creado_en;
+    cuando.textContent = formatearMomento(op.creado_en);
+
+    item.append(expresion, cuando);
+    return item;
+  });
+
+  // replaceChildren reemplaza todo el contenido de una: ni innerHTML = "" ni
+  // un while borrando hijos a mano. Una linea, sin parpadeo intermedio.
+  listaHistorial.replaceChildren(...filas);
+}
+
+
+function formatearMomento(iso) {
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) return "";
+
+  // Intl formatea segun la configuracion regional del visitante. No armes
+  // fechas a mano con getDate() y padStart: alguien en otro pais las lee al
+  // reves y el bug tarda meses en aparecer.
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(fecha);
+}
+
+
+function mostrarNota(texto, elemento = notaHistorial) {
+  elemento.textContent = texto;
+}
+
+
+// ---------------------------------------------------------------------------
+// Grafico de operaciones por tipo
+// ---------------------------------------------------------------------------
+// De donde sale cada barra: nombre para mostrar y color. Es la MISMA idea que
+// la tabla OPERACIONES del backend (seccion de main.py) — un solo lugar que
+// describe las operaciones conocidas, para no repetir la lista a mano en
+// cada funcion que la necesita.
+const INFO_OPERACION = {
+  suma:           { etiqueta: "Suma",           color: "var(--serie-suma)" },
+  resta:          { etiqueta: "Resta",          color: "var(--serie-resta)" },
+  multiplicacion: { etiqueta: "Multiplicación", color: "var(--serie-mult)" },
+  division:       { etiqueta: "División",       color: "var(--serie-div)" },
+  potencia:       { etiqueta: "Potencia",       color: "var(--serie-pot)" },
+  raiz:           { etiqueta: "Raíz",           color: "var(--serie-raiz)" },
+  porcentaje:     { etiqueta: "Porcentaje",     color: "var(--serie-porc)" },
+};
+
+/**
+ * Agrupa las operaciones por tipo y dibuja una barra horizontal por cada una.
+ *
+ * Barras HECHAS A MANO con divs (ancho en % via style), no con una libreria
+ * de graficos ni con <canvas>: para siete numeros no hace falta ni lo uno ni
+ * lo otro, y esto sigue siendo HTML de verdad — se puede inspeccionar,
+ * seleccionar el texto y le llega igual a un lector de pantalla (el
+ * role="img" + aria-label del contenedor lo anuncia como una unidad, y cada
+ * fila ademas lleva el numero en texto plano al lado de la barra).
+ */
+function pintarGrafico(operaciones) {
+  // Arrancamos el conteo en CERO para las siete operaciones conocidas, no
+  // solo para las que aparezcan. Así una operación que todavía nadie usó
+  // sale en el gráfico con una barra vacía en vez de directamente no
+  // aparecer, que es información distinta ("no la probaste" no es lo mismo
+  // que "no existe").
+  const conteo = Object.fromEntries(
+    Object.keys(INFO_OPERACION).map((clave) => [clave, 0])
+  );
+
+  for (const operacion of operaciones) {
+    if (operacion.operacion in conteo) conteo[operacion.operacion] += 1;
+  }
+
+  const total = operaciones.length;
+
+  if (total === 0) {
+    graficoBarras.replaceChildren();
+    mostrarNota(
+      "Todavía no hay operaciones guardadas. Hacé algunas cuentas y el gráfico va a ir tomando forma.",
+      notaGrafico
+    );
+    return;
+  }
+
+  mostrarNota(
+    `Distribución de las últimas ${total} operaciones guardadas, por tipo.`,
+    notaGrafico
+  );
+
+  // El maximo de la muestra define el 100% del ancho. Si graficaramos contra
+  // el TOTAL en vez de contra el maximo, la operacion mas usada nunca
+  // llegaria a ocupar toda la pista, y las diferencias entre las demas se
+  // verian todas achicadas por igual. Contra el maximo, la barra mas alta
+  // siempre se ve entera.
+  const maximo = Math.max(...Object.values(conteo));
+
+  const filas = Object.entries(conteo).map(([clave, cantidad]) => {
+    const { etiqueta, color } = INFO_OPERACION[clave];
+    const porcentaje = maximo === 0 ? 0 : (cantidad / maximo) * 100;
+
+    const fila = document.createElement("div");
+    fila.className = "fila-barra";
+
+    const etiquetaEl = document.createElement("span");
+    etiquetaEl.className = "etiqueta-barra";
+    etiquetaEl.textContent = etiqueta;
+
+    const pista = document.createElement("div");
+    pista.className = "pista-barra";
+
+    const barra = document.createElement("div");
+    barra.className = "barra";
+    barra.style.width = `${porcentaje}%`;
+    barra.style.background = color;
+    pista.appendChild(barra);
+
+    const valorEl = document.createElement("span");
+    valorEl.className = "valor-barra";
+    valorEl.textContent = cantidad;
+
+    fila.append(etiquetaEl, pista, valorEl);
+    return fila;
+  });
+
+  graficoBarras.replaceChildren(...filas);
+}
+
+
+// El boton ahora VACIA el historial local en vez de "actualizar" (ver el
+// comentario del <button> en el HTML: ya no hace falta actualizar algo que
+// se repinta solo). Un confirm() de por medio porque vaciar es una accion
+// que no se puede deshacer.
+botonRefrescar.addEventListener("click", () => {
+  if (confirm("¿Vaciar todo el historial guardado en este navegador? No se puede deshacer.")) {
+    vaciarHistorialLocal();
+  }
+});
+
+
+// Arranca solo, apenas carga la pagina: no hace falta preguntarle nada a la
+// API primero (localStorage esta disponible de entrada), asi que se pinta
+// de una.
+pintarHistorialYGrafico();
+</script>
+</body>
+</html>
